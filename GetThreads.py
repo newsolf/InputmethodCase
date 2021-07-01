@@ -96,7 +96,7 @@ def get_threads():
                 print('pid == 0,无法继续')
                 if retry_count > 3:
                     # set max min avg
-                    thread_avg = thread_total / thread_count
+                    thread_avg = thread_total / stats_count
                     out = "statsCount:%s max:%s min:%s avg: %s" % (stats_count, thread_max, thread_min, thread_avg)
                     print(out)
                     f.write(out)
