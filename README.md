@@ -1,0 +1,2 @@
+# InputmethodCase
+Init
