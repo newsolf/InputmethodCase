@@ -3,11 +3,14 @@
 # date 20210701
 
 import datetime
+import glob
 import re
 import time
 import os
 
 import xlwt as xlwt
+import xlrd
+from xlutils.copy import copy
 
 # PKG_NAME = "com.baidu.input"
 PKG_NAME = "com.huawei.ohos.inputmethod"
@@ -41,6 +44,12 @@ def get_pid(pkg_name):
     return 0
 
 
+def restart_process():
+    # 其他输入法的时候，需要重写这个方法
+    cmd = 'adb shell am start -n %s/com.appstore.view.activity.PrimaryActivity' % PKG_NAME
+    execute(cmd)
+
+
 def get_threads():
     pid = get_pid(PKG_NAME)
     if pid == 0:
@@ -49,7 +58,7 @@ def get_threads():
     pre_pid = pid
     cmd = "adb shell cat proc/" + str(pid) + "/status"
     # print(cmd)
-    list = execute(cmd)
+    list_info = execute(cmd)
     # print(list)
 
     file_name = "output/" + get_current_time() + "_" + str(pid) + ".txt"
@@ -64,6 +73,10 @@ def get_threads():
     result_cols = 0
     for row_result in range(len(result_title)):
         result_sheet.write(result_cols, row_result, result_title[row_result])  # 写标题
+
+    result_file_name = "output/%s_%d.xls" % (PKG_NAME, pre_pid)
+    result.save(result_file_name)
+
     # f.write(get_current_time() + "\n")
     # f.write("pid = %s \n" % pid)
     thread_max = 0
@@ -72,8 +85,8 @@ def get_threads():
     thread_total = 0
     thread_count = 0
 
-    for i in range(len(list)):
-        s = list[i]
+    for i in range(len(list_info)):
+        s = list_info[i]
         # print(s)
         if s.startswith('Threads'):
             parts = re.split("\s+", s)
@@ -90,27 +103,40 @@ def get_threads():
         info = execute(cmd)
         # print (info)
         if len(info) == 0:
+            if retry_count == 0:
+                retry_start_time = time.time()
+            restart_process()
             pid = get_pid(PKG_NAME)
             retry_count += 1
             if pid == 0:
-                print('pid == 0,无法继续')
+                print('pid == 0,无法继续 retry %d time:%s' % (retry_count, datetime.datetime.now()))
                 if retry_count > 3:
+                    retry_end_time = time.time()
+                    retry_use_time = retry_end_time - retry_start_time
+                    print('retry_use_time %.2f s,and retry finished!!' % retry_use_time)
                     # set max min avg
                     thread_avg = thread_total / stats_count
                     out = "statsCount:%s max:%s min:%s avg: %s" % (stats_count, thread_max, thread_min, thread_avg)
                     print(out)
                     f.write(out)
+                    try:
+                        new_file = switch_to_append_model(result_file_name, result_sheet)
+                        result_sheet = new_file[0]
+                        new_work_book = new_file[1]
 
-                    result_cols += 1
-                    result_sheet.write(result_cols, 0, "stats: %s, by NeWolf" % out)
-                    result_file_name = "output/%s_%d_%d.xls" % (PKG_NAME, pre_pid, stats_count)
-                    result.save(result_file_name)
+                        result_cols += 1
+                        result_sheet.write(result_cols, 0, "stats: %s, by NeWolf" % out)
+                        new_work_book.save(result_file_name)
+                    except Exception as e:
+                        print(e)
                     break
-                time.sleep(5)
-                continue
+                else:
+                    time.sleep(5)
+                    continue
 
-            pre_pid = pid
-
+            # pre_pid = pid
+            retry_count = 0
+            print("retry get pid %d " % pid)
             cmd = "adb shell cat proc/" + str(pid) + "/status"
             f.write("pid = %i \n" % pid)
             continue
@@ -138,12 +164,34 @@ def get_threads():
                 f.write(out)
 
                 threads_stats = [get_current_time(), pid, thread_count, threads_name]
+                new_file = switch_to_append_model(result_file_name, result_sheet)
+                result_sheet = new_file[0]
+                new_work_book = new_file[1]
                 result_cols += 1
                 for row_result in range(len(threads_stats)):
                     result_sheet.write(result_cols, row_result, threads_stats[row_result])
+                new_work_book.save(result_file_name)
                 break
         time.sleep(1)
     f.close()
+
+
+def switch_to_append_model(result_file_name, result_sheet):
+    word_book = xlrd.open_workbook(result_file_name)
+    # 获取所有的sheet表单。
+    sheets = word_book.sheet_names()
+    # 获取第一个表单
+    work_sheet = word_book.sheet_by_name(sheets[0])
+    # 获取已经写入的行数
+    # old_rows = work_sheet.nrows
+    # 获取表头信息
+    # heads = work_sheet.row_values(0)
+    # 将xlrd对象变成xlwt
+    new_work_book = copy(word_book)
+    # 添加内容
+    result_sheet = new_work_book.get_sheet(0)
+    new_file = [result_sheet, new_work_book]
+    return new_file
 
 
 def get_threads_name(pid):
